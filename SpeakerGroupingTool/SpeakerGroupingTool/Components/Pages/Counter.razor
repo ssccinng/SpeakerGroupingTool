@@ -1,0 +1,281 @@
+﻿@page "/counter1"
+@page "/"
+@using SpeakerGroupingTool.Models
+@rendermode InteractiveServer
+
+@inject WebsocketService wsSevice
+@inject IJSRuntime js
+
+@inject ILogger<Counter> logger
+
+<FluentGrid>
+    <FluentGridItem xs="12">
+        <FluentStack>
+            <FluentTextField @bind-Value="username"></FluentTextField>
+            <FluentButton OnClick="OnUserChange">加载</FluentButton>
+        </FluentStack>
+    </FluentGridItem>
+
+    <FluentGridItem xs="6">
+        <div Style="height:800px; overflow:auto;" >
+
+            <FluentDataGrid Pagination="@pagination" Items="@items" OnRowFocus="@((FluentDataGridRow<Story> r) => OnSelectRow(r))">
+            <PropertyColumn Property="x => x.knn_result" Title="AI一选" />
+                <PropertyColumn Property="x => x.estimated_speaker" Title="推测编号" />
+
+                <TemplateColumn Title="人物" Style="overflow:visible" Context="contextc" >
+                    <FluentCombobox Value="@contextc!.人物" style="color:red"
+                    @ref="combobox[contextc!.RowIndex]"
+                                    ValueChanged="(v)=>Change(v, contextc)"
+                                   
+                                tabindex="-1"
+                                Autocomplete="ComboboxAutocomplete.Inline"
+                                    TOption="string"
+
+                                    Width="100%"
+                                    Items="autoCompleteSource"
+
+                                    Multiple="false"
+                                    @onkeydown="@(k => AutoLabel(k, contextc))"
+                                    Placeholder="@contextc.AIM" />
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.人物台词" Title="台词" />
+            <PropertyColumn Property="x => x.开始时间" Title="开始时间" />
+        </FluentDataGrid>
+        </div>
+        <FluentPaginator State="@pagination" />
+
+    </FluentGridItem>
+    <FluentGridItem xs="6">
+        <FluentStack HorizontalAlignment="HorizontalAlignment.Center" Orientation="Orientation.Vertical">
+            <div class="card">
+                <img src="@selectStory?.image" style="max-width:480px" />
+
+            </div>
+          @*   <audio controls style="width:100%">
+                <source src="source\亮剑10\audios\0.wav" type="audio/mpeg">
+                Your browser does not support the audio element.
+            </audio> *@
+            <script>
+                // function changeSource() {
+                //     var audio = document.getElementById("myAudio");
+                //     // var currentSource = audio.getAttribute("src");
+
+                //     // // 切换音频源
+                //     // if (currentSource === "audio1.mp3") {
+                //     //     audio.setAttribute("src", "audio2.mp3");
+                //     // } else {
+                //     //     audio.setAttribute("src", "audio1.mp3");
+                //     // }
+
+                //     // 重新加载音频以播放新源
+                //     audio.load();
+                // }
+
+                window.changeAudioSource = (newSource) => {
+                    if (window.myAudio) {
+                        window.myAudio.src = newSource;
+                        window.myAudio.load();
+                    }
+                };
+            </script>
+            <audio controls style="width:100%" id="myAudio">
+                <source src="@selectStory?.audio" type="audio/mpeg">
+                Your browser does not support the audio element.
+            </audio>
+            <FluentGrid Style="width:100%">
+  @*               <FluentGridItem xs="4">
+                    <FluentStack Orientation="Orientation.Vertical" HorizontalAlignment="HorizontalAlignment.Center">
+                        <FluentButton Style="width:100px">
+                            保存
+                        </FluentButton>
+                    </FluentStack>
+                </FluentGridItem> *@
+                <FluentGridItem xs="12">
+                    <FluentCombobox Items="userParquets" @bind-Value="loadParquet"/>
+                    <FluentButton OnClick="LoadDataSet" >加载</FluentButton>
+                    <FluentButton OnClick="SaveDataSet">保存</FluentButton>
+                </FluentGridItem>
+                <FluentGridItem xs="5">
+                    
+                    <FluentListbox Items="userParquets" @bind-Value="selectParquets">
+
+                    </FluentListbox>
+                </FluentGridItem>
+                <FluentGridItem xs="2">
+
+                    <FluentStack Orientation="Orientation.Vertical" VerticalAlignment="VerticalAlignment.Center">
+                        <FluentButton OnClick="OnAdd">添加</FluentButton>
+                        <FluentButton OnClick="OnDelete">删除</FluentButton>
+                    </FluentStack>
+                </FluentGridItem>
+                <FluentGridItem xs="5">
+
+                    <FluentListbox Items="ParquetInWork" @bind-Value="chooseParquets">
+
+                    </FluentListbox>
+                </FluentGridItem>
+            </FluentGrid>
+        </FluentStack>
+    </FluentGridItem>
+</FluentGrid>
+
+@code {
+    private int currentCount = 0;
+    FluentDataGrid<Story> Grid;
+    Story[] Stories { get; set; } = [];
+    IQueryable<Story>? items;
+    PaginationState pagination = new PaginationState { ItemsPerPage = 50 };
+    string[] userParquets = [];
+    HashSet<string> ParquetInWork = [];
+
+    HashSet<string> autoCompleteSource = [string.Empty];
+
+    FluentCombobox<string>[] combobox;
+
+    string username;
+    string loadParquet;
+    string selectParquets;
+    string chooseParquets;
+    public List<string> LoadedDataset = [];
+
+    Story? selectStory;
+    private void IncrementCount()
+    {
+        currentCount++;
+    }
+    async Task AutoLabel(KeyboardEventArgs k, Story context)
+    {
+
+        if (k.Key == "Tab" || k.Key == " ")
+        {
+
+            if (string.IsNullOrEmpty(context.人物))
+            {
+                context.人物 = context.AIM;
+                // StateHasChanged();
+                logger.LogInformation("AutoLabel");
+                await UpdateDataSet(context);
+
+                await pagination.SetCurrentPageIndexAsync((context.RowIndex + 1) / pagination.ItemsPerPage);
+                if (context.RowIndex < combobox.Length - 1)
+                {
+                    await combobox[context.RowIndex + 1].Element.FocusAsync();
+                }
+                // await combobox[context.RowIndex + 1].Element.FocusAsync();
+            }
+
+
+        }
+    }
+
+    void UpAutoSource()
+    {
+
+    }
+
+    private async Task OnSelectRow(FluentDataGridRow<Story> story)
+    {
+        selectStory = story.Item;
+        await ChangeAudio();
+    }
+
+    async Task ChangeAudio()
+    {
+        await js.InvokeVoidAsync("changeAudioSource", selectStory.audio);
+    }
+    async Task Change(string v, Story story)
+    {
+        story.人物 = v;
+        await UpdateDataSet(story);
+        logger.LogInformation("Change");
+
+    }
+
+    async Task SaveDataSet()
+    {
+        await wsSevice.Save(username);
+    }
+    // 选择文件上传
+    async Task UpdateDataSet(Story story)
+    {
+        logger.LogInformation("UpdateDataSet");
+
+        if (string.IsNullOrWhiteSpace(story.人物)) return;
+        var res = await wsSevice.UpdateStories(username, [story]);
+        lock (this)
+        {
+
+
+        // autoCompleteSource = [null];
+        foreach (var s in Stories)
+        {
+            autoCompleteSource.Add(s.人物);
+        }
+
+
+        for (int i = 0; i < Stories.Length; i++)
+        {
+            Stories[i].estimated_speaker = res[i].estimated_speaker;
+            Stories[i].knn_result = res[i].knn_result;
+            Stories[i].人物 = Stories[i].人物;
+
+
+        }
+        items = Stories.AsQueryable();
+
+        StateHasChanged();
+        }
+
+
+    }
+    async Task LoadDataSet()
+    {
+        Stories = await wsSevice.GetStories(username, loadParquet, ParquetInWork.ToArray());
+        items = Stories.AsQueryable();
+        autoCompleteSource = Stories.Select(s => s.人物).ToHashSet();
+        combobox = new FluentCombobox<string>[Stories.Length];
+    }
+
+    void OnUserChange()
+    {
+        userParquets = wsSevice.GetParquets(username);
+    }
+
+    void OnAdd()
+    {
+        ParquetInWork.Add(selectParquets);
+    }
+
+    void OnDelete()
+    {
+        ParquetInWork.Remove(chooseParquets);
+
+    }
+
+
+    FluentInputFile? myFileUploader = default!;
+    FluentInputFileEventArgs[] Files = Array.Empty<FluentInputFileEventArgs>();
+
+    void OnCompleted(IEnumerable<FluentInputFileEventArgs> files)
+    {
+        Files = files.ToArray();
+
+
+        // For the demo, delete these files.
+        foreach (var file in Files)
+        {
+            file.LocalFile?.Delete();
+        }
+    }
+
+    // class Story
+    // {
+    //     public DateTime StartTime { get; set; }
+    //     public DateTime EndTime { get; set; }
+    //     public string Person { get; set; }
+    //     public string Dialogue { get; set; }
+    //     public string VoicePath { get; set; }
+    //     public string ScreenShotPath { get; set; }
+    // }
+}
